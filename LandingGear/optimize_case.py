@@ -4,18 +4,8 @@ import matplotlib.pyplot as plt
 from get_responses import get_underdamped_response, get_overdamped_response, get_critically_damped_response
 from get_forces_and_displacements import get_F_trans, get_reaction_force, get_displacement
 from get_initial_conditions import get_vibration_parameters
-
-# Constants
-m = 10  # kg
-g = 9.81  # m/s²
-v_stall = 10.79  # m/s
-v_stall_y = 0.25 * v_stall
-v0 = 1.1 * v_stall_y  # m/s
-a = 0.15  # distance from front landing gear to center of mass (m)
-b = 0.15  # distance from rear landing gear to center of mass (m)
-Icg = 0.5 * m * (a**2 + b**2)  # moment of inertia of the system relative to center of mass (kg·m²)
-If = Icg + m * a**2  # moment of inertia of the system relative to front landing gear (kg·m²)
-
+from inputs import *
+from constants import g
 
 def evaluate_case(x):
     """Evaluate a single case and return F_max if valid, else inf."""
@@ -57,9 +47,9 @@ if __name__ == "__main__":
     
     # User inputs
     k_min = 100
-    k_max = 1000
+    k_max = 5000
     c_min = 5
-    c_max = 300
+    c_max = 500
     displacement_limit = 0.1
 
     # Optimization using brute force grid search
