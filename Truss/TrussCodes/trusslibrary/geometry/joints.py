@@ -1,96 +1,68 @@
 import numpy as np
 
-def generatesquarejoints(comprimento, divisao, x0=0):                                 ## creating square truss
+
+def _get_joint_coords(joint):
     """
-    Parameters
-    ----------
-    comprimento : recebe comprimento da treliça
-    divisao: recebe o comprimento de uma divisão da treliça
-
-    What it does
-
-    Cria os nós para a treliça, em quadrados de lado divisao e igualmente espaçados por divisao
-
-    Returns
-    -------
-    joints: vetor contendo as coordenadas dos pontos na ordem A B C D da primeira para a última seção
+    Retorna as coordenadas da junta - inserir joint[12] para coords da junta 12
     """
+    return joint['coords'] if isinstance(joint, dict) else joint
+
+def _ensure_joint_dict(joint, default_sections=None):
+    """
+    Garante que joint estará no formato adequado, com coords e sections
+    """
+    if isinstance(joint, dict):
+        if 'coords' not in joint:
+            joint = {'coords': _get_joint_coords(joint), 'sections': joint.get('sections', list(default_sections or []))}
+        if 'sections' not in joint:
+            joint['sections'] = list(default_sections or [])
+        return joint
+    return {'coords': _get_joint_coords(joint), 'sections': list(default_sections or [])}
+
+def _add_joint_section(joint, section):
+    """
+    Adiciona section na junta
+    """
+    joint = _ensure_joint_dict(joint, default_sections=['truss'])
+    if section not in joint['sections']:
+        joint['sections'].append(section)
+    return joint
+
+def _joint_sections(joint):
+    """
+    Retorna as sections da junta
+    """
+    if isinstance(joint, dict):
+        return joint.get('sections', [])
+    return []
+
+def generatesquarejoints(comprimento, divisao, divisao2=None, transicao=0.5, x0=0):
+    if divisao2 is None:
+        divisao2 = divisao
+
+    nsections = comprimento // divisao + 1
+    transicao_idx = int(nsections * transicao)
+
+    # centro fixo — metade da maior divisao
+    cy = max(divisao, divisao2) / 2
+    cz = max(divisao, divisao2) / 2
+
     joints = []
-    nsections = comprimento // divisao + 1                                           ## numero de secoes
+    x = x0
     for i in range(nsections):
-        A = (x0 + i * divisao, 0, 0)
-        B = (x0 + i * divisao, divisao, 0)
-        C = (x0 + i * divisao, 0, divisao)
-        D = (x0 + i * divisao, divisao, divisao)
-        joints.append(A)
-        joints.append(B)
-        joints.append(C)
-        joints.append(D)
+        part = 1 if i < transicao_idx else 2
+        d = divisao if part == 1 else divisao2
+        half = d / 2
+
+        for coord in [
+            (x, cy - half, cz - half),  # A
+            (x, cy + half, cz - half),  # B
+            (x, cy - half, cz + half),  # C
+            (x, cy + half, cz + half),  # D
+        ]:
+            joints.append({'coords': coord, 'sections': ['truss'], 'part': part})
+
+        x += d
+
     return joints
 
-def addnosejoints(h, b, l, joints):
-    """
-    Parameters
-    ----------
-    h: distância vertical do nariz
-    b: distância horizontal do nariz
-    l: comprimento dos lados do nariz
-    joints: vetor contendo as coordenadas dos pontos na ordem A B C D da primeira para a última seção
-
-    What it does
-
-    Insere um nariz na geometria, com coordenada central de h
-    """
-    Afinal = joints[0]   ## obtendo as coordenadas do fim do nariz
-    Bfinal = joints[1]
-    Cfinal = joints[2]  
-    Dfinal = joints[3]
-
-    ladotruss = np.linalg.norm(np.array(joints[0]) - np.array(joints[1]))   ## medindo o lado da treliça para calcular o desvio do tailboom
-    desvio = (ladotruss-l)/2                                    
-    A0 = np.array(Afinal) + np.array((-b, desvio, desvio+h))   ## coordenada do ponto A0 do nariz
-    B0 = np.array(Bfinal) + np.array((-b, -desvio, desvio+h))
-    C0 = np.array(Cfinal) + np.array((-b, desvio, -desvio+h))
-    D0 = np.array(Dfinal) + np.array((-b, -desvio, -desvio+h))
-
-    joints.insert(0, A0)   ## inserindo os pontos do nariz no vetor de juntas
-    joints.insert(1, B0)    
-    joints.insert(2, C0)
-    joints.insert(3, D0)  ## insert ta errado
-
-def addtailboom(h, b, l, joints, cubes=False):
-    """
-    Parameters
-    ----------
-    h: altura do tailboom
-    b: largura da seção do tailboom
-    l: comprimento horizontal do tailboom 
-    joints: vetor contendo as coordenadas dos pontos na ordem A B C D da primeira para a última seção
-    cubes: booleano para escolher se as juntas do tailboom serão cúbicas (reduzindo Asec) ou mantém Asec (ficam como paralelepípedos)
-    What it does
-
-    Insere um tailboom na geometria, com coordenada central de h
-    """
-    nsections = int(l/b)   ## numero de seções do tailboom
-
-    desvio = 0
-    if cubes:
-        ladotruss = np.linalg.norm(np.array(joints[4]) - np.array(joints[5]))   ## medindo o lado da treliça para calcular o desvio do tailboom
-        desvio = (ladotruss-b)/2                                                # queremos que o tailboom tenha lado b, entao medimos o lado da trelica e descontamos a metade da largura do tailboom
-    Abase = np.array(joints[-4]) + np.array((0, desvio, desvio))    ## coordenadas base do inicio do tailboom
-    Bbase = np.array(joints[-3]) - np.array((0, desvio, -desvio))
-    Cbase = np.array(joints[-2]) + np.array((0, desvio, -desvio))
-    Dbase = np.array(joints[-1]) - np.array((0, desvio, desvio))
-
-    vec = np.array((int(l/nsections), 0, int(h/nsections)))   ## vetor diretor p deslocamento dos pontos
-
-    for i in range(1,nsections):
-        Anew = i*vec + np.array(Abase)   ## coordenada do ponto A0 do nariz
-        Bnew = i*vec + np.array(Bbase)
-        Cnew = i*vec + np.array(Cbase)
-        Dnew = i*vec + np.array(Dbase)
-
-        joints.append(Anew)   ## inserindo os pontos do tailboom no vetor de juntas
-        joints.append(Bnew)    
-        joints.append(Cnew)
-        joints.append(Dnew)

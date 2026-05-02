@@ -8,13 +8,18 @@ import slientruss3d.truss as sl
 import matplotlib.pyplot as plt 
 
 length = 480
-div_len = 120
-d=6                                               ## mm
+#div_len = 120
+div_len = 120                                       ## balsa
+#d=6                                               ## mm
+d = 17                                              ## mm - balsa
 area = np.pi*d**2/4
-E = 210000                                         # MPa (N/mm²)
-density = 1.5e-6                                   # kg/mm³
+#E = 210000                                         # MPa (N/mm²)
+E = 1600                                            # MPa (N/mm²) - balsa
+#density = 1.5e-6                                   # kg/mm³
+density = 1.5e-7                                    # kg/mm³ - balsa
 I = np.pi*d**4/64
-allowablestress = 400                              ## MPa
+#allowablestress = 400                              ## MPa
+allowablestress = 14                               ## MPa - balsa            
 jointtype = 0                                      ## junta quadrada (nao tem outras implementadas)
 trusstype = 3                                      ## 0->warren / 1-> pratt / 2-> howe / 3-> cross 
 truss = sl.Truss(dim=3)                                                ## obj Truss de dimensao 3

@@ -1,264 +1,173 @@
 import numpy as np
 from slientruss3d.truss import Truss
 from slientruss3d.type import MemberType
-from .geometry import splitnosetrusstailboom
+from .geometry import split_parts
+from trusslibrary import get_section_label
 
-def safetycoefanls(truss, members, stress, elementforces, allowablestress, I, E, 
-                   joints=None, members_list=None, I_dict=None):
+def get_member_I(member_idx, members_list, joints, I_dict, I_default, member_types_dict=None):
     """
-    Parameters
-    ----------
-    truss : objeto treliça do slientruss3d
-    members: vetor contendo os IDs dos pontos que cada uma das barras liga
-    stress : dict que o slientruss retorna com as tensoes das trelicas
-    elementforces : dict que o slientruss retorna com as forças internas das treliças
-    allowablestress : tensao máxima que o material suporta
-    I : momento de inércia da seção das barras (para backward compatibility)
-    E : Módulo de Young do material
-    joints : lista de coordenadas dos joints (opcional, necessário para análise compartimentalizada)
-    members_list : lista de tuplas (j0, j1) dos membros (opcional, necessário para análise compartimentalizada)
-    I_dict : dict com momentos de inércia por seção {'nose': I_nose, 'truss': I_truss, 'tailboom': I_tailboom}
-             Se fornecido, retorna análise compartimentalizada por seção
-
-    Returns
-    -------
-    Se I_dict é None (backward compatibility):
-        Tupla com: (maxcompressionstress, maxtensionstress, maxcompression, maxtension, 
-                   minSFtension, minSFcompression, minSFbuckling)
-    
-    Se I_dict é fornecido:
-        Dict compartimentalizado com estrutura:
-        {
-            'global': {...valores globais...},
-            'nose': {...valores da seção nariz...},
-            'truss': {...valores da seção treliça...},
-            'tailboom': {...valores da seção tailboom...}
-        }
+    Obtém momento de inércia do objeto
     """
-    
-    def _calculate_section_results(section_stress, section_forces, section_length_index_pairs, I_value):
-        """Calcula resultados para uma seção específica"""
-        if not section_stress or not section_forces:
-            return None
-        
-        # Stress analysis
-        max_comp_stress = abs(min(section_stress))
-        max_tens_stress = max(section_stress)
-        
-        # Force analysis
-        max_comp_force = abs(min(section_forces))
-        max_tens_force = max(section_forces)
-        
-        min_SF_tension = allowablestress / max_tens_stress if max_tens_stress > 0 else np.inf
-        min_SF_compression = abs(allowablestress / max_comp_stress) if max_comp_stress > 0 else np.inf
-        
-        # Buckling analysis para a seção
-        buckling_SF = []
-        for length, global_member_idx in section_length_index_pairs:
-            # Obter força do membro global
-            force = elementforces.get(global_member_idx, 0)
-            if force < 0 and I_value is not None:
-                Pcr = np.pi**2 * E * I_value / length**2
-                buckling_SF.append(-Pcr / force)
-            elif force < 0:
-                buckling_SF.append(np.inf)
-        
-        min_SF_buckling = min(buckling_SF) if buckling_SF else np.inf
-        
-        return {
-            'max_compression_stress': max_comp_stress,
-            'max_tension_stress': max_tens_stress,
-            'max_compression_force': max_comp_force,
-            'max_tension_force': max_tens_force,
-            'min_SF_tension': min_SF_tension,
-            'min_SF_compression': min_SF_compression,
-            'min_SF_buckling': min_SF_buckling
-        }
-    
-    # ============ ANÁLISE GLOBAL (backward compatibility) ============
-    maxcompressionstress = abs(min(stress.values()))
-    maxtensionstress = max(stress.values())
-    maxcompression = abs(min(elementforces.values()))
-    maxtension = max(elementforces.values())
-    minSFtension = allowablestress / maxtensionstress
-    minSFcompression = abs(allowablestress / maxcompressionstress)
+    if I_dict is None or members_list is None or joints is None:
+        return I_default
+    j0, j1 = members_list[member_idx]
+    label = get_section_label(j0, j1, joints, member_types_dict)
+    if label is None:
+        return I_default
+    return I_dict.get(label, I_default)
 
-    # Buckling analysis global
-    lengths = []
-    member_ids_with_forces = []
-    for memberID, connect in members.items():
-        member = truss.GetMemberFromConnect(connect)
-        lengths.append(member.length)
-        if memberID in elementforces:
-            member_ids_with_forces.append(memberID)
-    
-    # Se I_dict for fornecido, usar I correto por membro
-    if I_dict is not None and joints is not None and members_list is not None:
-        nosejoints, trussjoints, tailboomjoints = splitnosetrusstailboom(joints, case='geometry')
-        nose_end = len(nosejoints)
-        truss_end = nose_end + len(trussjoints)
-        
-        bucklingsafetyfactor = []
-        for memberID in member_ids_with_forces:
-            # Encontrar o índice do membro na lista members_list
-            member_index = None
-            for idx, (j0, j1) in enumerate(members_list):
-                # Este é um membro que conecta j0 e j1, mas preciso mapear para memberID
-                # Como memberID é sequencial, assumo que member_index = memberID
-                if idx == memberID:
-                    member_index = idx
-                    break
-            
-            if member_index is not None:
-                max_id = max(members_list[member_index][0], members_list[member_index][1])
-                if max_id < nose_end:
-                    I_member = I_dict.get('nose', I)
-                elif max_id < truss_end:
-                    I_member = I_dict.get('truss', I)
-                else:
-                    I_member = I_dict.get('tailboom', I)
-                
-                P = elementforces[memberID]
-                if P < 0:
-                    L = lengths[memberID]  # lengths está indexado por memberID
-                    Pcr = np.pi**2 * E * I_member / L**2
-                    bucklingsafetyfactor.append(-Pcr / P)
-                else:
-                    bucklingsafetyfactor.append(np.inf)
-    else:
-        # Análise global original (todos membros com mesmo I)
-        bucklingsafetyfactor = []
-        for memberID in member_ids_with_forces:
-            P = elementforces[memberID]
-            if P < 0:
-                L = lengths[memberID]
-                Pcr = np.pi**2 * E * I / L**2
-                bucklingsafetyfactor.append(-Pcr / P)
-            else:
-                bucklingsafetyfactor.append(np.inf)
-    
-    minSFbuckling = min(i for i in bucklingsafetyfactor if i > 0) if bucklingsafetyfactor else np.inf
+def calc_buckling_sf(member_idx, P, I_member, members, truss, E):
+    """
+    Retorna SF de buckling do membro
+    """
+    connect = members[member_idx]
+    member = truss.GetMemberFromConnect(connect)
+    L = member.length
+    if L < 1e-10:
+        return np.inf
+    Pcr = np.pi**2 * E * I_member / L**2
+    return -Pcr / P if P < 0 else np.inf
 
-    # ============ SE NÃO FOR COMPARTIMENTALIZADO, RETORNA COMO ANTES ============
-    if I_dict is None or joints is None or members_list is None:
-        return (
-            maxcompressionstress,
-            maxtensionstress,
-            maxcompression,
-            maxtension,
-            minSFtension,
-            minSFcompression,
-            minSFbuckling
-        )
 
-    # ============ ANÁLISE COMPARTIMENTALIZADA ============
-    nosejoints, trussjoints, tailboomjoints = splitnosetrusstailboom(joints, case='geometry')
-    nose_end = len(nosejoints)
-    truss_end = nose_end + len(trussjoints)
-    
-    # Separar por seção
-    sections = {'nose': [], 'truss': [], 'tailboom': []}
-    
-    for member_idx, (j0, j1) in enumerate(members_list):
-        max_id = max(j0, j1)
-        
-        if max_id < nose_end:
-            section = 'nose'
-        elif max_id < truss_end:
-            section = 'truss'
-        else:
-            section = 'tailboom'
-        
-        sections[section].append(member_idx)
-    
-    # Calcular resultados por seção
-    results = {
-        'global': {
-            'max_compression_stress': maxcompressionstress,
-            'max_tension_stress': maxtensionstress,
-            'max_compression_force': maxcompression,
-            'max_tension_force': maxtension,
-            'min_SF_tension': minSFtension,
-            'min_SF_compression': minSFcompression,
-            'min_SF_buckling': minSFbuckling  # Agora usa o valor correto calculado acima
-        }
+def calc_section_results(member_indices, stress, elementforces, allowablestress,
+                         members, truss, E, members_list, joints, I_dict, I_default,
+                         member_types_dict=None):
+    """
+    Coeficientes baseados em cada section 
+    """
+    s_stress = [stress[i] for i in member_indices if i in stress]
+    s_forces = [elementforces[i] for i in member_indices if i in elementforces]
+    if not s_stress or not s_forces:
+        return None
+
+    max_comp_stress = abs(min(s_stress)) if min(s_stress) < 0 else 0
+    max_tens_stress = max(s_stress) if max(s_stress) > 0 else 0
+    min_SF_tens = allowablestress / max_tens_stress if max_tens_stress > 0 else np.inf
+    min_SF_comp = allowablestress / max_comp_stress if max_comp_stress > 0 else np.inf
+
+    bsf = [calc_buckling_sf(i, elementforces[i], 
+            get_member_I(i, members_list, joints, I_dict, I_default, member_types_dict),
+            members, truss, E)
+        for i in member_indices if i in elementforces and elementforces[i] < 0]
+    min_SF_buck = min(bsf) if bsf else np.inf
+
+    return {
+        'max_compression_stress': max_comp_stress,
+        'max_tension_stress':     max_tens_stress,
+        'max_compression_force':  abs(min(s_forces)) if min(s_forces) < 0 else 0,
+        'max_tension_force':      max(s_forces) if max(s_forces) > 0 else 0,
+        'min_SF_tension':         min_SF_tens,
+        'min_SF_compression':     min_SF_comp,
+        'min_SF_buckling':        min_SF_buck,
     }
-    
-    for section_name in ['nose', 'truss', 'tailboom']:
-        member_indices = sections[section_name]
-        
-        if not member_indices:
-            results[section_name] = None
-            continue
-        
-        # Coletar stress e forces para esta seção
-        section_stress = []
-        section_forces = []
-        section_length_index_pairs = []
-        
-        for local_idx, global_member_idx in enumerate(member_indices):
-            if global_member_idx in stress:
-                section_stress.append(stress[global_member_idx])
-            if global_member_idx in elementforces:
-                section_forces.append(elementforces[global_member_idx])
-            
-            # Obter comprimento do membro
-            connect = members[global_member_idx]
-            member = truss.GetMemberFromConnect(connect)
-            section_length_index_pairs.append((member.length, global_member_idx))
-        
-        if not section_stress or not section_forces:
-            results[section_name] = None
-            continue
-        
-        I_section = I_dict.get(section_name, I)
-        results[section_name] = _calculate_section_results(
-            section_stress, section_forces, section_length_index_pairs, I_section
-        )
-    
-    return results
 
-def settruss(joints, supports, forces, members, truss, memberType, member_types_dict=None):
+
+def classify_members_by_section(members, members_list, joints, member_types_dict=None):
     """
-    Parameters
-    ----------
-    joints : recebe joints, que armazena as coordenadas dos pontos.
-    supports : vetor contendo os tipos de suporte para cada nó na mesma ordem de joints
-    forces : ID das forças e vetor de força
-    members: vetor contendo os IDs dos pontos que cada uma das barras liga, ex: barra de ID i liga a tupla i de pontos
-    truss : truss que foi criada a partir da biblioteca usando Truss().
-    memberType : definido por MemberType(area, E, density). Usado como padrão para todos os membros se member_types_dict não for fornecido.
-    member_types_dict : dict opcional com tipos de membro para diferentes partes: {'nose': memberType_nose, 'truss': memberType_truss, 'tailboom': memberType_tailboom}.
-                        Se fornecido, atribui tipos diferentes com base na seção da estrutura.
-
-    Returns
-    -------
-    trussmembers : objeto treliça, que será resolvido para obtenção dos resultados
-
+    Retorna dict {label: [member_ids]} usando get_section_label.
     """
-    # Split joints to determine ranges for member assignment
-    nosejoints, trussjoints, tailboomjoints = splitnosetrusstailboom(joints)
-    nose_end = len(nosejoints)
-    truss_end = nose_end + len(trussjoints)
+    by_section = {}
+    for mid in members.keys():
+        j0, j1 = members_list[mid]
+        label = get_section_label(j0, j1, joints, member_types_dict) or 'unknown'
+        by_section.setdefault(label, []).append(mid)
+    return by_section
+
+    
+    def get_mt(j0, j1):
+        if not member_types_dict:
+            return memberType
+
+        jnt0 = joints[j0] if isinstance(joints[j0], dict) else {}
+        jnt1 = joints[j1] if isinstance(joints[j1], dict) else {}
+
+        s0 = set(jnt0.get('sections', []))
+        s1 = set(jnt1.get('sections', []))
+
+        common = s0 & s1  
+
+        # ========= PRIORIDADE: INTERSEÇÃO =========
+        if 'truss' in common:
+            p0 = jnt0.get('part', 1)
+            p1 = jnt1.get('part', 1)
+            part = max(p0, p1)
+            return member_types_dict.get(f'fuselage_{part}', memberType)
+        
+        if 'landinggear_tow' in common or 'landinggear_pyr' in common:
+            return member_types_dict.get('landinggear', memberType)
+
+        if 'tailboom' in common:
+            return member_types_dict.get('tailboom', memberType)
+
+        if 'nose' in common:
+            return member_types_dict.get('nose', memberType)
+
+        # ========= FALLBACK: NÃO HÁ INTERSEÇÃO =========
+
+        all_sections = s0 | s1
+
+        if 'nose' in all_sections:
+            return member_types_dict.get('nose', memberType)
+        
+        if 'landinggear_tow' in all_sections or 'landinggear_pyr' in all_sections:
+            return member_types_dict.get('landinggear', memberType)
+        
+        if 'truss' in all_sections:
+            p0 = jnt0.get('part', 1)
+            p1 = jnt1.get('part', 1)
+            part = max(p0, p1)
+            return member_types_dict.get(f'fuselage_{part}', memberType)
+
+        if 'tailboom' in all_sections:
+            return member_types_dict.get('tailboom', memberType)
+
+        
+        return memberType
 
     for joint, support in zip(joints, supports):
-        truss.AddNewJoint(joint, support)
+        coord = joint['coords'] if isinstance(joint, dict) else joint
+        truss.AddNewJoint(coord, support)
     for jointID, force in forces:
         truss.AddExternalForce(jointID, force)
     for jointID0, jointID1 in members:
-        max_id = max(jointID0, jointID1)
-        if member_types_dict:
-            if max_id < nose_end:
-                mt = member_types_dict.get('nose', memberType)
-            elif max_id < truss_end:
-                mt = member_types_dict.get('truss', memberType)
-            else:
-                mt = member_types_dict.get('tailboom', memberType)
-        else:
-            mt = memberType
-        truss.AddNewMember(jointID0, jointID1, mt)
-    trussmembers = truss.GetMembers()
-    return trussmembers
+        truss.AddNewMember(jointID0, jointID1, get_mt(jointID0, jointID1))
+    
+    return truss.GetMembers()
+
+def safetycoefanls(truss, members, stress, elementforces, allowablestress, I, E,
+                   joints=None, members_list=None, I_dict=None, member_types_dict=None):
+    """
+    Análise de coeficientes de segurança
+    """
+
+    all_member_ids = list(members.keys())
+
+    global_results = calc_section_results(all_member_ids, stress, elementforces, allowablestress,
+    members, truss, E, members_list, joints, I_dict, I,member_types_dict)
+
+    # backward compatibility
+    if I_dict is None or joints is None or members_list is None:
+        return (
+            global_results['max_compression_stress'],
+            global_results['max_tension_stress'],
+            global_results['max_compression_force'],
+            global_results['max_tension_force'],
+            global_results['min_SF_tension'],
+            global_results['min_SF_compression'],
+            global_results['min_SF_buckling'],
+        )
+
+    by_section = classify_members_by_section(members, members_list, joints, member_types_dict)
+
+    results = {'global': global_results}
+    for label, member_ids in by_section.items():
+        results[label] = calc_section_results(
+            member_ids, stress, elementforces, allowablestress,
+            members, truss, E, members_list, joints, I_dict, I,
+            member_types_dict
+        )
+
+    return results
 
 def analyzetruss(comprimento, divisao, d, E, density, allowablestress, jointtype, trusstype):
     """

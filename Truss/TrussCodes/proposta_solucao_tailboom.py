@@ -60,5 +60,5 @@ print(f"SF tração: {minSFtension:.2f}")
 print(f"SF buckling: {minSFbuckling:.2f}")
 print(f"Truss weight: {truss.weight*1000:.3f}g")
 
-tl.plottrussBC(joints, supports, forces, members,view="side", scale_force=2.0,title=None)   
+tl.plottrussBC(joints, supports, forces, members,view="3d", scale_force=2.0,title=None)   
 #tl.plottruss(truss, trussmembers, '3d', elementforces, label = 'Forças internas', title='Warren')

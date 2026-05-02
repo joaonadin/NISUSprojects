@@ -21,12 +21,12 @@ allowablestress = 400                              # MPa
 
 # ============ CRIAR MEMBER TYPES ============
 mt_nose, I_nose = tl.set_memberType(d_nose, E, density)
-mt_truss, I_truss = tl.set_memberType(d_truss, E, density)
+mt_fuselage, I_fuselage = tl.set_memberType(d_truss, E, density)
 mt_tailboom, I_tailboom = tl.set_memberType(d_tailboom, E, density)
 
 member_types = {
     'nose': mt_nose,
-    'truss': mt_truss,
+    'fuselage': mt_fuselage,
     'tailboom': mt_tailboom
 }
 
@@ -41,7 +41,7 @@ supports = tl.generatesupports(pinados, joints)
 members = tl.setgeom(joints, trussgeom=0, nosegeom=1, tailboomgeom=0)
 
 # ============ CRIAR ESTRUTURA COM DIÂMETROS VARIÁVEIS ============
-trussmembers = tl.settruss(joints, supports, forces, members, truss, mt_truss, member_types)
+trussmembers = tl.settruss(joints, supports, forces, members, truss, mt_fuselage, member_types)
 
 # ============ RESOLVER E EXTRAIR RESULTADOS ============
 truss.Solve()
@@ -49,8 +49,6 @@ stress = truss.GetInternalStresses()
 elementforces = truss.GetInternalForces()
 reactionforces = truss.GetResistances()
 
-print("Reações nos apoios:")
-print(reactionforces)
 
 # ============ PÓS-PROCESSAMENTO ============
 # Modo 1: Análise global (backward compatible - como antes)
@@ -62,17 +60,17 @@ print(reactionforces)
     minSFtension,
     minSFcompression,
     minSFbuckling,
-) = tl.safetycoefanls(truss, trussmembers, stress, elementforces, allowablestress, I_truss, E)
+) = tl.safetycoefanls(truss, trussmembers, stress, elementforces, allowablestress, I_fuselage, E)
 
 # Modo 2: Análise compartimentalizada (novo - separa por seção)
 I_dict = {
     'nose': I_nose,
-    'truss': I_truss,
+    'fuselage': I_fuselage,
     'tailboom': I_tailboom
 }
 
 results_compartmentalized = tl.safetycoefanls(
-    truss, trussmembers, stress, elementforces, allowablestress, I_truss, E,
+    truss, trussmembers, stress, elementforces, allowablestress, I_fuselage, E,
     joints=joints, members_list=members, I_dict=I_dict
 )
 

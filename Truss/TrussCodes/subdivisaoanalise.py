@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 comprimento = 480
 divisao = [20, 30, 40, 60, 80, 120]
 geometria = [0, 1, 2, 3]
-d = 3.5                                               ## mm
+d = 3                                               ## mm
 E = 210000                                         # MPa (N/mm²)
 density = 1.5e-6                                   # kg/mm³
 allowablestress = 400                              ## MPa
@@ -47,6 +47,8 @@ for j,div in enumerate(divisao):
                           "SFbuckling " : minSFbuckling[i,j],
                           "mass " : mass[i,j],
             }
+
+print(results)
 
 # filename = rf"C:/Users/joaon/Desktop/NISUS/Truss/Análises/Subdivisão/diametro{d}/geometriadivisao.json"
 # tl.save_table(filename, geometria, divisao, results)

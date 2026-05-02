@@ -1,7 +1,9 @@
 import numpy as np
-from .geometry.fulltrusses import splitnosetrusstailboom
+from .geometry.fulltrusses import split_parts
+from .geometry.landing_gear import get_matched_joints_tower
+from .geometry.landing_gear import get_matched_joints_pyramid
 
-def setstudysquare(joints):
+def setstudysquare(joints, mode):
     """
     Parameters
     ----------
@@ -12,7 +14,9 @@ def setstudysquare(joints):
     Atribui forças de acordo com o caso básico de estudo definido:
         35N de tração dividido entre 4 nós frontais,
         380N de sustentação dividido entre nós superiores, desconsiderando primeira e última seções
-        70N de payload, divididos entre os 2 nós inferiores localizados em 40% do comprimento
+        140N de payload, divididos entre os 2 nós inferiores localizados em 40% do comprimento
+        OBS: no caso concentrated, insere forças concentradas no início - mais coerente com a proposta
+             adotada pela equipe para o projeto 2026
     Fixa nós da última seção - completamente pinados
 
     Returns
@@ -21,28 +25,51 @@ def setstudysquare(joints):
     forces : ID das forças e vetor de força
     Ambos no formato que o slientruss usa
     """
-    jointids = np.arange(0, len(joints), 1)   # getting joint ids
-    nsections = len(joints) // 4
-    pinados = jointids[-4:]                 ## last 4 nodes pinned
-    tracionados = jointids[:4]              ## first 4 nodes get traction
-    upperright = np.arange(6, 2 + 4 * (nsections - 1), 4)  ## upper right nodes (looking from front - excluding first and last section)
-    upperleft = np.arange(7, 3 + 4 * (nsections - 1), 4)  ## upper left nodes (looking from front - excluding first and last section)
-    payloadnode1 = int(nsections * 0.4) * 4           ## payload put on 40% of extension
-    payloadnode2 = int(nsections * 0.4) * 4 + 1
-    Lforce = 190 / len(upperright)               ## 190N distributed on nodes
-    Payload = 35                                 ## 35N each node for 7kg payload
-    Tforce = -35 / len(tracionados)              ## 35N distributed on tractioned nodes
+    # pega apenas joints da fuselagem com seus índices globais
+    truss_ids = [i for i, j in enumerate(joints)
+                 if isinstance(j, dict) and 'truss' in j.get('sections', [])]
+    nose_ids =  [i for i, j in enumerate(joints)
+                 if isinstance(j, dict) and 'nose' or 'truss' in j.get('sections', [])]           
+
+    nsections = len(truss_ids) // 4
+
+    pinados    = np.array(truss_ids[-4:])
+    tracionados = np.array(nose_ids[:4])
+
+    if (mode == 'distributed'):
+        # nós superiores excluindo primeira e última seção (índices locais 6,7 por seção)
+        upperright = np.array([truss_ids[4*s + 2] for s in range(1, nsections - 1)])
+        upperleft  = np.array([truss_ids[4*s + 3] for s in range(1, nsections - 1)])
+        payload_section = int(nsections * 0.4)
+        payloadnode1 = truss_ids[payload_section * 4]
+        payloadnode2 = truss_ids[payload_section * 4 + 1]
+    elif (mode == 'concentrated'):
+        s = 0                                             ## apply on first section
+        upperright = np.array([truss_ids[4*s + 2] ])
+        upperleft  = np.array([truss_ids[4*s + 3] ])
+        payload_section = s+1
+        payloadnode1 = truss_ids[payload_section * 4]
+        payloadnode2 = truss_ids[payload_section * 4 + 1]
+    else: 
+        print("ERRO: especifique um estudo")
+        return 
+
+
+    Lforce  =  190 / len(upperright)
+    Payload =  70
+    Tforce  = -35 / len(tracionados)
+
     forces = []
     forces.append((payloadnode1, (0, 0, -Payload)))
     forces.append((payloadnode2, (0, 0, -Payload)))
     for i in tracionados:
-        forces.append((i, (Tforce, 0, 0)))  ## jointID, vetor
-    for i in upperleft:
-        forces.append((i, (0, 0, Lforce)))
+        forces.append((int(i), (Tforce, 0, 0)))
     for i in upperright:
-        forces.append((i, (0, 0, Lforce)))
-    return pinados, forces
+        forces.append((int(i), (0, 0, Lforce)))
+    for i in upperleft:
+        forces.append((int(i), (0, 0, Lforce)))
 
+    return pinados, forces
 
 def setstudyfull(joints):
     """
@@ -61,13 +88,16 @@ def setstudyfull(joints):
 
     """
     joints = np.array(joints)
-    nosejoints, trussjoints, tailboomjoints = splitnosetrusstailboom(joints, case = 'forces')
+    nosejoints, trussjoints, tailboomjoints = split_parts(joints, case = 'forces')[0:3]
     forces = []
     jointids = np.arange(0, len(joints), 1)   # getting joint ids 
     labels = np.array([0]*len(nosejoints) + [1]*len(trussjoints) + [2]*len(tailboomjoints), dtype=int)  ## 0 for nose, 1 for truss, 2 for tailboom
-    tracionados = jointids[labels == 0]  ## first 4 nodes get traction
-    upperright = jointids[(labels == 1) & (joints[:,1]>0) & (joints[:,2]>0)]  ## upper right node IDs 
-    upperleft = jointids[(labels == 1)& (joints[:,1]==0) & (joints[:,2]>0)]  ## upper left node IDs
+    tracionados = jointids[labels == 0][:4]   ## first 4 nodes get traction
+    coords = np.array([j['coords'] if isinstance(j, dict) else j for j in joints])
+    upperright = jointids[(labels == 1) & (coords[:,1] > 0) & (coords[:,2] > 0)]
+    upperleft  = jointids[(labels == 1) & (coords[:,1] == 0) & (coords[:,2] > 0)]
+    # upperright = jointids[(labels == 1) & (joints[:,1]>0) & (joints[:,2]>0)]  ## upper right node IDs 
+    # upperleft = jointids[(labels == 1)& (joints[:,1]==0) & (joints[:,2]>0)]  ## upper left node IDs
     upperright= upperright[1:-1]   ## tirando primeiros e últimos p aplicar forças
     upperleft = upperleft[1:-1]
     negativeliftnodes = jointids[-4:]     ## joints que recebem sustentação invertida
@@ -90,3 +120,92 @@ def setstudyfull(joints):
     for i in upperright:
         forces.append((i, (0, 0, Lforce)))
     return pinnednodes, forces
+
+def set_study_tailboom(joints, force, moment):
+    """
+    Parameters
+    ----------
+    joints : recebe joints, que armazena as coordenadas dos pontos.
+    force: força de sustentação negativa a ser aplicada na cauda, em N
+    moment: momento a ser induzido na cauda, em Nm
+
+    What it does
+
+    Atribui forças de acordo com o caso básico de estudo definido para o tailboom:
+        Força de sustentação negativa dividida no fim do tailboom
+        Momento induzido por binário no fim do tailboom
+
+    """
+    joints_coords = np.array([joint['coords'] if isinstance(joint, dict) else joint for joint in joints])
+    forces = []
+    jointids = np.arange(0, len(joints), 1)   # getting joint ids 
+    labels = []
+    for joint in joints:
+        if isinstance(joint, dict):
+            sections = joint.get('sections', [])
+            if 'tailboom' in sections:
+                labels.append(2)
+            elif 'truss' in sections:
+                labels.append(1)
+            elif 'nose' in sections:
+                labels.append(0)
+            else:
+                labels.append(3)
+        else:
+            labels.append(3)
+    labels = np.array(labels, dtype=int)
+    tailboom_nodes = jointids[labels == 2]       ## joints que recebem sustentação invertida
+    fixed_nodes = tailboom_nodes[:4]              ## primeiros 4 nós do tailboom são fixos
+    upper_last_section = tailboom_nodes[-2:]       ## ultimos 2 nós
+    upper_last_but_one_section = tailboom_nodes[-6:-4]   ## 2 nós superiores da ultima seção
+    distance_between_nodes = abs(joints_coords[tailboom_nodes[-1]][0] - joints_coords[tailboom_nodes[-5]][0])  ## distância em x entre os últimos nós do tailboom
+    Fmoment = moment / (distance_between_nodes*1e-2) ## força equivalente para o momento aplicado
+    for i in upper_last_section:
+        forces.append((i, (0, 0, force/2 + Fmoment/2)))
+    for i in upper_last_but_one_section:
+        forces.append((i, (0, 0, - Fmoment/2)))
+    return fixed_nodes, forces
+
+def set_study_landinggear(joints, force):
+    """
+    Parameters
+    ----------
+    joints : recebe joints, que armazena as coordenadas dos pontos.
+    force: tupla (Fx, Fy, Fz) com as componentes da força a ser aplicada, em N
+
+    What it does
+
+    Atribui forças de acordo com o caso básico de estudo definido para o landing gear:
+        Força dividida igualmente entre os 4 últimos nós do landing gear
+        Fixa os 4 primeiros nós do landing gear
+
+    """
+    forces = []
+    jointids = np.arange(0, len(joints), 1)
+    labels = []
+    for joint in joints:
+        if isinstance(joint, dict):
+            sections = joint.get('sections', [])
+            if 'landinggear_tow' or 'landinggear_pyr' in sections:
+                labels.append(1)
+            else:
+                labels.append(0)
+        else:
+            labels.append(0)
+    labels = np.array(labels, dtype=int)
+    landinggear_nodes = jointids[labels == 1]
+    nosejoints = split_parts(joints, case = 'forces')[0]
+    trussjoints = split_parts(joints, case = 'forces')[1] 
+    landinggearjoints = split_parts(joints, case = 'forces')[3]
+    truss_indices = [idx for idx, joint in enumerate(joints) 
+                 if isinstance(joint, dict) and 'truss' in joint.get('sections', [])]
+    if 'landinggear_tow' in sections:
+        matched_local = get_matched_joints_tower(landinggearjoints, trussjoints)
+        fixed_nodes = np.array([truss_indices[i] for i in matched_local])
+    if 'landinggear_pyr' in sections:
+        matched_local = get_matched_joints_pyramid(joints, landinggearjoints, trussjoints)
+        fixed_nodes = np.array([truss_indices[i] for i in matched_local])
+    last_nodes = landinggear_nodes[-4:]
+    for i in last_nodes:
+        forces.append((i, (force[0]/4, force[1]/4, force[2]/4)))
+    return fixed_nodes, forces

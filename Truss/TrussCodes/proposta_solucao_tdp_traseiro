@@ -1,0 +1,107 @@
+
+import trusslibrary as tl
+import numpy as np
+import slientruss3d.truss as sl
+import matplotlib.pyplot as plt 
+from trusslibrary.geometry.members import set_memberType
+
+def get_lg_joints(lado, altura):                                 ## creating square truss
+    """
+    Recebe lado e altura do trem de pouso e retorna as coordenadas dos pontos A B C D E, onde E é o ponto da roda.
+    """
+    joints = []
+    A = (0, 0,  0)
+    B = (lado, 0, 0)
+    C = (0, lado, 0)
+    D = (lado, lado, 0)
+    E = (0, -lado, 0)
+    F = (lado, -lado, 0)
+    G = A - np.array([0, 0, altura])
+    H = B - np.array([0, 0, altura])
+    joints.append(A) #0
+    joints.append(B) #1
+    joints.append(C) #2
+    joints.append(D) #3
+    joints.append(E) #4
+    joints.append(F) #5
+    joints.append(G) #6
+    joints.append(H) #7
+    return joints
+
+def get_lg_members():
+    members = []
+    members.append((0, 1))
+    members.append((0, 2))
+    members.append((0, 4))
+    members.append((0, 6))
+
+    members.append((1, 3))
+    members.append((1, 5))
+    members.append((1, 7))
+
+    members.append((2, 3)) 
+    members.append((4, 5))  
+
+    members.append((0, 7))
+    members.append((1, 6))
+
+    members.append((3, 7))
+    members.append((5, 7))
+    members.append((2, 6))
+    members.append((4, 6))
+
+    members.append((6, 7))
+
+    return members
+
+def get_lg_supports(pinados):
+    supports = len(joints) * [sl.SupportType.NO]
+    for node_id in pinados:
+        supports[node_id] = sl.SupportType.PIN
+    return supports
+
+truss = sl.Truss(dim=3)                                               
+joints = get_lg_joints(100, 150)
+jointids = np.arange(0, len(joints), 1)   # getting joint ids
+pinados = [0, 1, 2, 3, 4, 5]              ## nodes A, B, C, D are pinned
+lower_node_id = jointids[-1]              ## node E is the one with the payload
+forces = [(6, (150, 0, 400)), (7, (-150, 0, 400))]
+supports = get_lg_supports(pinados)
+members = get_lg_members()
+
+d = 2.5                                            ## mm
+E = 210000                                         # MPa (N/mm²)
+density = 1.5e-6                                   # kg/mm³
+allowablestress = 400                              ## MPa
+memberType, I = set_memberType(d, E, density)  ## usando recurso do slientruss
+
+
+
+trussmembers = tl.settruss(joints, supports, forces, members, truss, memberType)
+truss.Solve()
+stress = truss.GetInternalStresses()
+elementforces = truss.GetInternalForces()
+displacements = truss.GetDisplacements(isProtect=True)
+
+
+## pos processamento dos dados
+(
+maxcompressionstress,
+maxtensionstress,
+maxcompression,
+maxtension,
+minSFtension,
+minSFcompression,
+minSFbuckling,
+) = tl.safetycoefanls(truss, trussmembers, stress, elementforces, allowablestress, I, E)
+
+
+print(f"SF compressão: {minSFcompression:.2f}")
+print(f"SF tração: {np.inf}")
+print(f"SF flambagem: {minSFbuckling:.2f}") 
+print(f"Truss weight: {truss.weight*1000:.3f}g")
+
+print(displacements)
+# tl.plottrussBC(joints, supports, forces, members,view="3d", scale_force=2.0,title=None)   
+tl.plottruss(truss, trussmembers, '3d', elementforces, label = 'Forças internas', title='Warren')
+# print(trussmembers)
