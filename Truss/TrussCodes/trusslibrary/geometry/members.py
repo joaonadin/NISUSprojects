@@ -7,4 +7,6 @@ def set_memberType(d, E, density):
     mt = MemberType(area, E, density)
     mt.I = I  # anexa direto no objeto
     mt.d = d  # útil para plots de diâmetro também
+    mt.E = E
+    mt.density = density
     return mt, I

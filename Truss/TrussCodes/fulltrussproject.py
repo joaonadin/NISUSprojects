@@ -1,28 +1,37 @@
 import  trusslibrary as tl
 import numpy as np
 import slientruss3d.truss as sl
+import os
 
-
-d_fuselage_1 = 3.5
-d_fuselage_2 = 2.5
+## ORIGINAL
+d_fuselage_1 = 2
+d_fuselage_2 = 2
 d_nose = 2
 d_tailboom = 2
-d_landing_gear = 2.5
+d_landing_gear = 2
+
+## REDUZIDO 
+# d_fuselage_1 = 3
+# d_fuselage_2 = 2
+# d_nose = 1.5
+# d_tailboom = 1.5
+# d_landing_gear = 2
+
 
 optimal_slenderness_ratio = 18
 
 base_unit_fuselage_1 = 90
 base_unit_fuselage_2 = int( optimal_slenderness_ratio * d_fuselage_2 )
 
-x = 0.4             ## transicao
-l1 = x*525
-l2 = 525-l1
-n1 = int(l1 / (18*d_fuselage_1))
-n2 = int(l2 / (18*d_fuselage_2))
+# x = 0.4             ## transicao
+# l1 = x*575
+# l2 = 575-l1
+# n1 = int(l1 / (18*d_fuselage_1))
+# n2 = int(l2 / (18*d_fuselage_2))
 
-len_fuselage = n1 * base_unit_fuselage_1 + n2 * base_unit_fuselage_2   ## approx. 50
+# len_fuselage = n1 * base_unit_fuselage_1 + n2 * base_unit_fuselage_2   ## approx. 50
 
-print(f"Fuselage length: {len_fuselage:.2f}")
+# print(f"Fuselage length: {len_fuselage:.2f}")
 
 E = 210000                                         # MPa (N/mm²)
 density = 1.5e-6                                   # kg/mm³
@@ -42,18 +51,21 @@ member_types = {
     'landinggear':  mt_landing_gear,
 }
 
-joints = tl.generatesquarejoints(len_fuselage, divisao=base_unit_fuselage_1, divisao2=base_unit_fuselage_2, transicao=0.4)
+optimal_div_2 = optimal_slenderness_ratio * d_fuselage_2
+joints = tl.generatesquarejoints(divisao=90, n1=1, divisao2=90, n2=5)
 tl.addnosejoints(h=0, b=50, l=30, joints=joints)
-tl.addtailboom_straight(h=320, b=25, l=740, joints=joints, d_tailboom=d_tailboom)
+#tl.addtailboom_straight(h=328, l=740, joints=joints, d_tailboom=d_tailboom)
+tl.addtailboom(h=301, l=765, joints=joints, d_tailboom=d_tailboom, b = 50)
 tl.add_landing_gear_pyramid(h=100, b = 10, joints=joints, section=0)
 
 # ============ GERAR GEOMETRIA ============
 truss = sl.Truss(dim=3)
-members = tl.setgeom(joints, trussgeom=0, nosegeom=0, tailboomgeom=0)
+members = tl.setgeom(joints, trussgeom=0, nosegeom=0, tailboomgeom=0, 
+                     tailboom_encaixe_params={'L': 120, 'b': optimal_slenderness_ratio*d_tailboom})
 
 #pinados, forces = tl.set_study_landinggear(joints, force=(0, 0, 500))
-pinados, forces = tl.set_study_tailboom(joints, force=-70, moment=-1.5)
-#pinados, forces = tl.setstudysquare(joints, 'concentrated')
+pinados, forces = tl.set_study_tailboom(joints, force=-30, moment=-1.5)
+#pinados, forces = tl.setstudysquare(joints, 'concentrated', 100)
 
 supports = tl.generatesupports(pinados, joints)
 
@@ -81,9 +93,27 @@ print(truss.weight)
 
 #tl.plottruss(truss, trussmembers, '3d', elementforces, label='Forças internas', title='Treliça Completa')
 
-tl.plottrussBC(joints, supports, forces, members,view="3d", scale_force=2.0,title='Condições de Contorno - Treliça Completa'
-              , member_diameters=member_diameters)
+# tl.plottrussBC(joints, supports, forces, members,view="3d", scale_force=2.0,title='Condições de Contorno - Treliça Completa'
+#               , member_diameters=member_diameters)
 
-#tl.plot_truss_fluid(joints, members)
+tl.plot_truss_fluid(joints, members)
 
 #tl.plottruss_sections(truss, trussmembers, members, joints,'side', member_types, 2.0)
+
+
+send_to = os.path.join(os.path.expanduser('~'), 'Desktop', 'NISUS\Truss\PRELIMINAR\B')
+os.makedirs(send_to, exist_ok=True)
+
+tl.truss_deliverable(
+    joints, members,
+    member_types_dict=member_types,
+    export_html=os.path.join(send_to, 'truss.html'),
+    export_csv=os.path.join(send_to, 'truss_data.csv')
+)
+
+# send_to = os.path.join('C:\\Users\\joaon\\Desktop\\NISUS\\Truss\\datfiles', 'truss_original.dat')
+# tl.export_apdl(joints, members, member_types, filepath=send_to)
+
+# desktop = os.path.join(os.path.expanduser('~'), 'Desktop', 'NISUS\Truss\TrussExport')
+# tl.export_spaceclaim(joints, members, member_types, 
+#                   filepath=os.path.join(desktop, 'truss_spaceclaim.py'))

@@ -283,6 +283,100 @@ def plot_truss_fluid(joints, members):
     fig.update_layout(scene=dict(aspectmode='data'))  # escala real dos eixos
     fig.show()
 
+def truss_deliverable(joints, members, member_types_dict=None, export_html=None, export_csv=None):
+    coords = [j['coords'] if isinstance(j, dict) else j for j in joints]
+
+    SECTION_COLORS = {
+        'nose':        '#e74c3c',
+        'fuselage_1':  '#3498db',
+        'fuselage_2':  '#2ecc71',
+        'tailboom':    '#f39c12',
+        'landinggear': '#9b59b6',
+        'encaixe':     '#1abc9c',
+        'unknown':     '#95a5a6',
+    }
+
+    from collections import defaultdict
+    section_members = defaultdict(list)
+    for i, j in members:
+        label = tl.get_section_label(i, j, joints, member_types_dict) or 'unknown' if member_types_dict else 'unknown'
+        section_members[label].append((i, j))
+
+    traces = []
+    for label, mlist in section_members.items():
+        edge_x, edge_y, edge_z = [], [], []
+        for i, j in mlist:
+            x0, y0, z0 = coords[i]
+            x1, y1, z1 = coords[j]
+            edge_x += [x0, x1, None]
+            edge_y += [y0, y1, None]
+            edge_z += [z0, z1, None]
+        color = SECTION_COLORS.get(label, '#95a5a6')
+        traces.append(go.Scatter3d(
+            x=edge_x, y=edge_y, z=edge_z,
+            mode='lines', line=dict(color=color, width=3), name=label
+        ))
+
+    traces.append(go.Scatter3d(
+        x=[c[0] for c in coords],
+        y=[c[1] for c in coords],
+        z=[c[2] for c in coords],
+        mode='markers', marker=dict(size=4, color='red'), name='joints',
+        text=[f'J{idx}: ({c[0]:.1f}, {c[1]:.1f}, {c[2]:.1f})' for idx, c in enumerate(coords)],
+        hoverinfo='text'
+    ))
+
+    fig = go.Figure(data=traces)
+    fig.update_layout(scene=dict(aspectmode='data'), legend=dict(title='Seção'))
+    fig.show()
+
+    if export_html:
+        fig.write_html(export_html, include_plotlyjs='cdn')
+        print(f"HTML exportado: {export_html}")
+
+    if export_csv:
+        # calcula larguras de coluna para alinhar
+        joint_rows = [[str(idx), f'{c[0]:.2f}', f'{c[1]:.2f}', f'{c[2]:.2f}']
+                      for idx, c in enumerate(coords)]
+
+        member_rows = []
+        for mid, (i, j) in enumerate(members):
+            label = tl.get_section_label(i, j, joints, member_types_dict) or 'unknown' if member_types_dict else 'unknown'
+            mt = member_types_dict.get(label) if member_types_dict else None
+            d = f'{getattr(mt, "d", 0):.4f}' if mt else ''
+            x0, y0, z0 = coords[i]
+            x1, y1, z1 = coords[j]
+            member_rows.append([
+                str(mid), str(i), str(j), label, d,
+                f'{x0:.2f}', f'{y0:.2f}', f'{z0:.2f}',
+                f'{x1:.2f}', f'{y1:.2f}', f'{z1:.2f}'
+            ])
+
+        def format_table(headers, rows):
+            widths = [len(h) for h in headers]
+            for row in rows:
+                for k, val in enumerate(row):
+                    widths[k] = max(widths[k], len(val))
+            sep = '  '
+            lines = []
+            lines.append(sep.join(h.ljust(widths[k]) for k, h in enumerate(headers)))
+            lines.append(sep.join('-' * widths[k] for k in range(len(headers))))
+            for row in rows:
+                lines.append(sep.join(val.ljust(widths[k]) for k, val in enumerate(row)))
+            return '\n'.join(lines)
+
+        joint_headers  = ['joint_id', 'x', 'y', 'z']
+        member_headers = ['member_id', 'j0', 'j1', 'section', 'diameter',
+                          'x0', 'y0', 'z0', 'x1', 'y1', 'z1']
+
+        with open(export_csv, 'w') as f:
+            f.write('VERTICES\n')
+            f.write(format_table(joint_headers, joint_rows))
+            f.write('\n\nMEMBROS\n')
+            f.write(format_table(member_headers, member_rows))
+
+        print(f"CSV exportado: {export_csv}")
+
 def plottruss_sections(truss, trussmembers, members_list, joints, view, member_types_dict=None, d_scale=2.0, title=None):
     """
     Plota a treliça com cores por seção (nose, fuselage_1, fuselage_2, tailboom, landinggear).

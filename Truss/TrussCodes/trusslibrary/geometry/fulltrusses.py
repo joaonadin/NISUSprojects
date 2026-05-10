@@ -1,5 +1,6 @@
 from .trusses import warrentruss, pratttruss, howetruss, crosstruss
 from .landing_gear import setlandinggearmembers
+from .tailboom_nose import add_tailboom_encaixe
 import numpy as np
 
 def split_parts(joints, case = 'geometry'):
@@ -45,7 +46,16 @@ def split_parts(joints, case = 'geometry'):
     
     return nosejoints, trussjoints, tailboomjoints, landinggearjoints
 
-def setgeom(joints, trussgeom, nosegeom, tailboomgeom):
+def setgeom(joints, trussgeom, nosegeom, tailboomgeom, tailboom_encaixe_params=None):
+    """Gera membros da treliça.
+    
+    Parameters
+    ----------
+    tailboom_encaixe_params : dict, optional
+        Dicionário com chaves 'L' e 'b' para ativar encaixe do tailboom.
+        L é o comprimento total do encaixe (distância em y entre E e F).
+        Ex: {'L': 100, 'b': 36}
+    """
     nosejoints, trussjoints, tailboomjoints, landinggearjoints = split_parts(joints)
 
     nosemembers    = warrentruss(nosejoints)    if nosegeom    == 0 else pratttruss(nosejoints)    if nosegeom    == 1 else howetruss(nosejoints)    if nosegeom    == 2 else crosstruss(nosejoints)
@@ -71,13 +81,19 @@ def setgeom(joints, trussgeom, nosegeom, tailboomgeom):
 
     members = nosemembers + trussmembers + tailboommembers + landinggearmembers + landinggear_truss_members
     members = list({(min(a, b), max(a, b)): (a, b) for a, b in members}.values())
+    
+    # Processar encaixe do tailboom se parâmetros fornecidos
+    if tailboom_encaixe_params:
+        encaixe_info = add_tailboom_encaixe(joints, **tailboom_encaixe_params)
+        # Remove membros automáticos que envolvem nós de encaixe
+        members = [m for m in members if not any(idx in encaixe_info['new_joint_indices'] for idx in m)]
+        # Adiciona conectores de encaixe
+        members.extend(encaixe_info['connector_members'])
+        members = list({(min(a, b), max(a, b)): (a, b) for a, b in members}.values())
+    
     return members
 
 def get_section_label(j0, j1, joints, member_types_dict=None):
-    """
-    Retorna a label de seção (ex: 'nose', 'fuselage_1', 'landinggear', etc.)
-    para um membro definido pelos joints j0 e j1.
-    """
     if not member_types_dict:
         return None
 
@@ -88,11 +104,12 @@ def get_section_label(j0, j1, joints, member_types_dict=None):
     s1 = set(jnt1.get('sections', []))
 
     common = s0 & s1
+    all_sections = s0 | s1
 
     # ========= PRIORIDADE: INTERSEÇÃO =========
     if 'truss' in common:
-        p0 = jnt0.get('part', 1)
-        p1 = jnt1.get('part', 1)
+        p0 = jnt0.get('part') or 1
+        p1 = jnt1.get('part') or 1
         part = min(p0, p1)
         return f'fuselage_{part}'
 
@@ -100,23 +117,26 @@ def get_section_label(j0, j1, joints, member_types_dict=None):
         return 'landinggear'
 
     if 'tailboom' in common:
+        if 'truss' in all_sections:
+            p0 = jnt0.get('part') or 2
+            p1 = jnt1.get('part') or 2
+            part = max(p0, p1)  # pega a parte mais alta (2)
+            return f'fuselage_{part}'
         return 'tailboom'
 
     if 'nose' in common:
         return 'nose'
 
     # ========= FALLBACK: UNIÃO =========
-    all_sections = s0 | s1
-
     if 'landinggear_tow' in all_sections or 'landinggear_pyr' in all_sections:
         return 'landinggear'
-    
+
     if 'nose' in all_sections:
         return 'nose'
 
     if 'truss' in all_sections:
-        p0 = jnt0.get('part', 1)
-        p1 = jnt1.get('part', 1)
+        p0 = jnt0.get('part') or 1
+        p1 = jnt1.get('part') or 1
         part = min(p0, p1)
         return f'fuselage_{part}'
 

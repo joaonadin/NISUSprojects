@@ -3,7 +3,7 @@ from .geometry.fulltrusses import split_parts
 from .geometry.landing_gear import get_matched_joints_tower
 from .geometry.landing_gear import get_matched_joints_pyramid
 
-def setstudysquare(joints, mode):
+def setstudysquare(joints, mode, Lforce):
     """
     Parameters
     ----------
@@ -55,7 +55,7 @@ def setstudysquare(joints, mode):
         return 
 
 
-    Lforce  =  190 / len(upperright)
+    Force  =  Lforce/2 / len(upperright)    ## metade da sustentação cada lado, dividido pela dist
     Payload =  70
     Tforce  = -35 / len(tracionados)
 
@@ -65,9 +65,9 @@ def setstudysquare(joints, mode):
     for i in tracionados:
         forces.append((int(i), (Tforce, 0, 0)))
     for i in upperright:
-        forces.append((int(i), (0, 0, Lforce)))
+        forces.append((int(i), (0, 0, Force)))
     for i in upperleft:
-        forces.append((int(i), (0, 0, Lforce)))
+        forces.append((int(i), (0, 0, Force)))
 
     return pinados, forces
 
@@ -134,6 +134,8 @@ def set_study_tailboom(joints, force, moment):
     Atribui forças de acordo com o caso básico de estudo definido para o tailboom:
         Força de sustentação negativa dividida no fim do tailboom
         Momento induzido por binário no fim do tailboom
+        Se há encaixe, aplica forças do upper_last_section em G2 e H2,
+        e upper_last_but_one_section em G e H
 
     """
     joints_coords = np.array([joint['coords'] if isinstance(joint, dict) else joint for joint in joints])
@@ -156,10 +158,27 @@ def set_study_tailboom(joints, force, moment):
     labels = np.array(labels, dtype=int)
     tailboom_nodes = jointids[labels == 2]       ## joints que recebem sustentação invertida
     fixed_nodes = tailboom_nodes[:4]              ## primeiros 4 nós do tailboom são fixos
-    upper_last_section = tailboom_nodes[-2:]       ## ultimos 2 nós
-    upper_last_but_one_section = tailboom_nodes[-6:-4]   ## 2 nós superiores da ultima seção
-    distance_between_nodes = abs(joints_coords[tailboom_nodes[-1]][0] - joints_coords[tailboom_nodes[-5]][0])  ## distância em x entre os últimos nós do tailboom
-    Fmoment = moment / (distance_between_nodes*1e-2) ## força equivalente para o momento aplicado
+    
+    # Verificar se há encaixe
+    encaixe_nodes = [idx for idx, j in enumerate(joints) if isinstance(j, dict) and 'encaixe' in j.get('sections', [])]
+    if encaixe_nodes:
+        # Há encaixe: aplicar forças nos joints específicos do encaixe
+        # Assumindo ordem: E, F, G, H, C2, D2, G2, H2
+        G = encaixe_nodes[2]   # G
+        H = encaixe_nodes[3]   # H
+        G2 = encaixe_nodes[6]  # G2
+        H2 = encaixe_nodes[7]  # H2
+        upper_last_section = [G2, H2]  # forças do upper_last_section em G2 e H2
+        upper_last_but_one_section = [G, H]  # forças do upper_last_but_one_section em G e H
+        # Distância para momento: usar entre G e G2 (distância em x = b)
+        distance_between_nodes = abs(joints_coords[G2][0] - joints_coords[G][0])
+    else:
+        # Sem encaixe: comportamento padrão
+        upper_last_section = tailboom_nodes[-2:]       ## ultimos 2 nós
+        upper_last_but_one_section = tailboom_nodes[-6:-4]   ## 2 nós superiores da ultima seção
+        distance_between_nodes = abs(joints_coords[tailboom_nodes[-1]][0] - joints_coords[tailboom_nodes[-5]][0])  ## distância em x entre os últimos nós do tailboom
+    
+    Fmoment = moment / (distance_between_nodes*1e-3) ## força equivalente para o momento aplicado
     for i in upper_last_section:
         forces.append((i, (0, 0, force/2 + Fmoment/2)))
     for i in upper_last_but_one_section:

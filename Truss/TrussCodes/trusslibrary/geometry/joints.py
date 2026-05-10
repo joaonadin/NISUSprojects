@@ -66,3 +66,39 @@ def generatesquarejoints(comprimento, divisao, divisao2=None, transicao=0.5, x0=
 
     return joints
 
+def generatesquarejoints(divisao, n1, divisao2=None, n2=0, x0=0):
+    """
+    Parameters
+    ----------
+    divisao  : tamanho da célula da parte 1
+    n1       : número de células da parte 1
+    divisao2 : tamanho da célula da parte 2 (None = igual à parte 1)
+    n2       : número de células da parte 2
+    x0       : posição inicial em x
+    """
+    if divisao2 is None:
+        divisao2 = divisao
+
+    cy = max(divisao, divisao2) / 2
+    cz = max(divisao, divisao2) / 2
+
+    joints = []
+    x = x0
+
+    for part, d, n in [(1, divisao, n1), (2, divisao2, n2)]:
+        if n == 0:
+            continue
+        half = d / 2
+        nsections = n + 1 if part == 1 else n  # parte 1 inclui o anel inicial, parte 2 continua
+
+        for _ in range(nsections):
+            for coord in [
+                (x, cy - half, cz - half),
+                (x, cy + half, cz - half),
+                (x, cy - half, cz + half),
+                (x, cy + half, cz + half),
+            ]:
+                joints.append({'coords': coord, 'sections': ['truss'], 'part': part})
+            x += d
+
+    return joints
