@@ -3,6 +3,8 @@ from .geometry import split_parts
 from .geometry.fulltrusses import get_section_label
 import trusslibrary as tl
 import numpy as np
+from collections import defaultdict
+
 
 def save_table(
         filename,
@@ -332,68 +334,287 @@ def print_material_lengths(members_list, joints, truss, member_types_dict, E):
     total = sum(lengths.values())
     print(f"{'TOTAL':<15} {'':>14} {total:>17.1f} {total/1000:>16.3f}")
 
+def _get_label(i, j, joints, member_types_dict):
+    """Retorna o label da seção para a barra (i,j). Adapte conforme sua lógica."""
+    return list(member_types_dict.keys())[0] if member_types_dict else "default"
+
 def export_spaceclaim(joints, members, member_types_dict, filepath='truss_spaceclaim.py'):
+    """
+    Gera um script Python para o ANSYS SpaceClaim/Discovery 26.1 que cria
+    a geometria da treliça usando elementos de barra (Beam) com seções circulares.
+ 
+    Parâmetros
+    ----------
+    joints : list
+        Lista de nós. Cada item pode ser um dict com chave 'coords'
+        ou diretamente uma tupla/lista (x, y, z).
+    members : list of (int, int)
+        Lista de barras como pares de índices de nós.
+    member_types_dict : dict
+        Dicionário {label: objeto_tipo} onde objeto_tipo tem atributo 'd' (diâmetro em mm).
+    filepath : str
+        Caminho de saída para o script .py do SpaceClaim.
+    """
     coords = [j['coords'] if isinstance(j, dict) else j for j in joints]
-
-    from collections import defaultdict
+ 
+    # agrupa barras por seção
     section_members = defaultdict(list)
-    member_sections = []
     for i, j in members:
-        label = get_section_label(i, j, joints, member_types_dict) or list(member_types_dict.keys())[0]
+        label = _get_label(i, j, joints, member_types_dict)
         section_members[label].append((i, j))
-        member_sections.append(label)
-
+ 
     lines = []
     w = lines.append
-
-    w("# ============================================================")
-    w("# TRELIÇA — GERADO AUTOMATICAMENTE POR export_spaceclaim()")
-    w("# ============================================================")
-    w("from SpaceClaim.Api.V252.Scripting.Helpers.Units import MM")
-    w("from SpaceClaim.Api.V252.Scripting.Helpers.DocumentHelper import GetRootPart")
-    w("from SpaceClaim.Api.V252.Scripting.Commands import BeamProfile")
-    w("from SpaceClaim.Api.V252.Scripting.Commands import Beam")
-    w("from SpaceClaim.Api.V252.Scripting.Commands.CommandResults import BeamResult")
-    w("from SpaceClaim.Api.V252 import DesignCurve")
-    w("from SpaceClaim.Api.V252.Geometry import Point, CurveSegment, CircleProfile, Plane, PointUV")
-    w("from SpaceClaim.Api.V252.Scripting.Selection import CurveSelection")
+ 
+    w("# Python Script, API Version = V261")
+    w("# TRELIÇA — GERADO AUTOMATICAMENTE")
+    w("# Rodar via: File > Scripting > Run Script")
     w("")
-    w("root = GetRootPart()")
-    w("doc  = root.Document")
+ 
+    # ── perfis — um por seção ──────────────────────────────────────────────
+    w("# ============================================================")
+    w("# PERFIS DE SEÇÃO CIRCULAR")
+    w("# Carrega o perfil circular padrão do SpaceClaim e renomeia")
+    w("# ============================================================")
     w("")
-
-    # ── perfis por seção ──────────────────────────────────────────────────
-    w("# --- PERFIS ---")
+ 
     for label in section_members.keys():
         mt = member_types_dict.get(label)
         d  = getattr(mt, 'd', 0)
-        r  = d / 2
-        w(f"# {label} — d={d:.2f} mm")
-        w(f"profile_result_{label} = BeamProfile.Create(doc, '{label}_d{d:.2f}', MM({r:.4f}), MM({r:.4f}))")
-        w(f"profile_part_{label} = profile_result_{label}.BeamProfilePart")
+        w(f"# {label}: diâmetro = {d:.2f} mm")
+        w(f'result_{label} = BeamProfile.CreateFromFile(r"Standard\Circular.scdocx", "{label}_d{d:.2f}mm", FileType.Supported)')
+        w(f"profile_part_{label} = result_{label}.CreatedProfile")
         w("")
-
-    # ── curvas e beams por seção ──────────────────────────────────────────
-    w("# --- MEMBROS ---")
+ 
+    # ── linhas 3D por seção ────────────────────────────────────────────────
+    w("# ============================================================")
+    w("# LINHAS 3D (DesignCurve + CurveSegment — funciona em qualquer plano)")
+    w("# ============================================================")
+    w("")
+ 
+    # índice global das curvas criadas (para montar a Selection depois)
+    curve_index = 0
+    section_curve_ranges = {}  # label -> (start_idx, end_idx)
+ 
     for label, mlist in section_members.items():
         mt = member_types_dict.get(label)
         d  = getattr(mt, 'd', 0)
-        w(f"# {label} — d={d:.2f} mm  ({len(mlist)} membros)")
+        w(f"# --- {label}: d={d:.2f} mm | {len(mlist)} barra(s) ---")
+ 
+        start_idx = curve_index
         for i, j in mlist:
             x0, y0, z0 = coords[i]
             x1, y1, z1 = coords[j]
-            w(f"seg   = CurveSegment.Create(Point.Create(MM({x0:.4f}), MM({y0:.4f}), MM({z0:.4f})), Point.Create(MM({x1:.4f}), MM({y1:.4f}), MM({z1:.4f})))")
-            w(f"curve = DesignCurve.Create(root, seg)")
-            w(f"sel   = CurveSelection.Create(curve)")
-            w(f"Beam.Create(profile_part_{label}, sel)")
+            w(f"# nó {i} → nó {j}")
+            w(f"_seg   = CurveSegment.Create(Point.Create(MM({x0:.4f}), MM({y0:.4f}), MM({z0:.4f})), Point.Create(MM({x1:.4f}), MM({y1:.4f}), MM({z1:.4f})))")
+            w(f"DesignCurve.Create(GetRootPart(), _seg)")
+            w("")
+            curve_index += 1
+ 
+        section_curve_ranges[label] = (start_idx, curve_index - 1)
+ 
+    # ── atribui perfil às barras de cada seção ────────────────────────────
+    w("# ============================================================")
+    w("# ATRIBUIÇÃO DE PERFIL → BEAM")
+    w("# ============================================================")
+    w("")
+ 
+    for label, (s, e) in section_curve_ranges.items():
+        indices = list(range(s, e + 1))
+        curve_list = ",\n\t".join([f"GetRootPart().Curves[{k}]" for k in indices])
+        w(f"# {label}")
+        w(f"selection = Selection.Create([{curve_list}])")
+        w(f"profile   = PartSelection.Create(profile_part_{label})")
+        w(f"Beam.Create(selection, profile)")
         w("")
-
-    w("# Fit view")
-    w("ViewHelper.ZoomToFit()")
-    w("print('Treliça carregada com sucesso.')")
-
-    with open(filepath, 'w') as f:
+ 
+    # ── agrupa em componente ──────────────────────────────────────────────
+    w("# ============================================================")
+    w("# AGRUPA TODAS AS BARRAS EM UM COMPONENTE")
+    w("# ============================================================")
+    all_indices = list(range(curve_index))
+    all_curves  = ",\n\t".join([f"GetRootPart().Curves[{k}]" for k in all_indices])
+    w(f"selection = Selection.Create([{all_curves}])")
+    w("ComponentHelper.MoveBodiesToComponent(selection, None)")
+    w("")
+ 
+    # ── fit view ──────────────────────────────────────────────────────────
+    w("try:")
+    w("    ViewHelper.ZoomToFit()")
+    w("except:")
+    w("    pass")
+    w("")
+    w(f"print('OK: {len(coords)} nos | {len(members)} barras | {len(section_members)} secoes')")
+ 
+    with open(filepath, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
-
+ 
     print(f"SpaceClaim script exportado: {filepath}")
-    print(f"  {len(coords)} pontos | {len(members)} membros | {len(section_members)} seções")
+    print(f"  {len(coords)} nós | {len(members)} barras | {len(section_members)} seções")
+
+
+def export_spaceclaim(joints, members, member_types_dict, filepath='truss_spaceclaim.py'):
+    """
+    Gera um script Python para o ANSYS SpaceClaim/Discovery 26.1 que cria
+    a geometria da treliça usando elementos de barra (Beam) com seções circulares.
+ 
+    Correções aplicadas:
+    - Cada barra em componente próprio (evita 'multiple edges' e nós duplicados)
+    - Share Topology via script (garante fusão de nós coincidentes)
+    - Perfil carregado corretamente via CreatedProfile
+    - Linhas 3D via CurveSegment + DesignCurve (funciona em qualquer plano)
+    - Beam.Create com ordem correta (selection, profile)
+ 
+    Parâmetros
+    ----------
+    joints : list
+        Lista de nós. Cada item pode ser um dict com chave 'coords'
+        ou diretamente uma tupla/lista (x, y, z).
+    members : list of (int, int)
+        Lista de barras como pares de índices de nós.
+    member_types_dict : dict
+        Dicionário {label: objeto_tipo} onde objeto_tipo tem atributo 'd' (diâmetro em mm).
+    filepath : str
+        Caminho de saída para o script .py do SpaceClaim.
+    """
+    coords = [j['coords'] if isinstance(j, dict) else j for j in joints]
+ 
+    section_members = defaultdict(list)
+    for i, j in members:
+        label = _get_label(i, j, joints, member_types_dict)
+        section_members[label].append((i, j))
+ 
+    lines = []
+    w = lines.append
+ 
+    w("# Python Script, API Version = V261")
+    w("# TRELIÇA — GERADO AUTOMATICAMENTE")
+    w("# Rodar via: File > Scripting > Run Script")
+    w("# Não fechar o SpaceClaim durante a execução.")
+    w("")
+ 
+    # ── perfis ────────────────────────────────────────────────────────────
+    w("# ============================================================")
+    w("# PERFIS DE SEÇÃO CIRCULAR")
+    w("# ============================================================")
+    w("")
+ 
+    for label in section_members.keys():
+        mt = member_types_dict.get(label)
+        d  = getattr(mt, 'd', 0)
+        w(f"# {label}: diâmetro = {d:.2f} mm")
+        w(f'_res_{label} = BeamProfile.CreateFromFile(r"Standard\Circular.scdocx", "{label}_d{d:.2f}mm", FileType.Supported)')
+        w(f"_prof_{label} = _res_{label}.CreatedProfile")
+        w(f"print('Perfil criado: {label}')")
+        w("")
+ 
+    # ── barras — cada uma em seu próprio componente ───────────────────────
+    w("# ============================================================")
+    w("# BARRAS — cada barra em componente isolado")
+    w("# Isso evita 'multiple edges' e garante nós únicos por barra.")
+    w("# O Share Topology no final funde os nós coincidentes.")
+    w("# ============================================================")
+    w("")
+ 
+    bar_index = 0
+    section_bar_ranges = {}  # label -> list of bar_indices
+ 
+    for label, mlist in section_members.items():
+        mt = member_types_dict.get(label)
+        d  = getattr(mt, 'd', 0)
+        w(f"# --- {label}: d={d:.2f} mm | {len(mlist)} barra(s) ---")
+ 
+        bar_indices = []
+        for i, j in mlist:
+            x0, y0, z0 = coords[i]
+            x1, y1, z1 = coords[j]
+            w(f"# barra {bar_index}: nó {i} → nó {j}")
+            w(f"_seg   = CurveSegment.Create(")
+            w(f"    Point.Create(MM({x0:.4f}), MM({y0:.4f}), MM({z0:.4f})),")
+            w(f"    Point.Create(MM({x1:.4f}), MM({y1:.4f}), MM({z1:.4f})))")
+            w(f"_curve = DesignCurve.Create(GetRootPart(), _seg)")
+            # atribui perfil imediatamente
+            w(f"_sel   = Selection.Create(_curve)")
+            w(f"_psel  = PartSelection.Create(_prof_{label})")
+            w(f"Beam.Create(_sel, _psel)")
+            # isola em componente próprio — evita multiple edges
+            w(f"ComponentHelper.MoveBodiesToComponent(Selection.Create(_curve), None)")
+            w("")
+            bar_indices.append(bar_index)
+            bar_index += 1
+ 
+        section_bar_ranges[label] = bar_indices
+        w("")
+ 
+    # ── share topology — funde nós coincidentes ───────────────────────────
+    w("# ============================================================")
+    w("# SHARE TOPOLOGY — funde nós coincidentes entre barras")
+    w("# Equivale ao Merge no SpaceClaim 26.1")
+    w("# ============================================================")
+    w("_root = GetRootPart()")
+    w("_all_sel = Selection.Create(_root.Components)")
+    w("ShareTopology.FindAndFix(_all_sel)")
+    w("print('Share Topology aplicado.')")
+    w("")
+ 
+    # ── fit view ──────────────────────────────────────────────────────────
+    w("try:")
+    w("    ViewHelper.ZoomToFit()")
+    w("except:")
+    w("    pass")
+    w("")
+    w(f"print('OK: {len(coords)} nos | {len(members)} barras | {len(section_members)} secoes')")
+    w("print('Pronto. Atualize a geometria no Workbench antes de abrir o Mechanical.')")
+ 
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+ 
+    print(f"SpaceClaim script exportado: {filepath}")
+    print(f"  {len(coords)} nós | {len(members)} barras | {len(section_members)} seções")
+ 
+ 
+def export_apdl_truss_snippet(member_types_dict, filepath='truss_link180.apdl'):
+    """
+    Gera um Command Snippet APDL para o Mechanical que força comportamento
+    de barra (LINK180) em todos os line bodies.
+ 
+    Como usar no Mechanical:
+      Static Structural > botão direito > Insert > Commands
+      Cole o conteúdo. Certifique que roda antes da solução (Step 1).
+    """
+    apdl = []
+    apdl.append("! ============================================================")
+    apdl.append("! COMMAND SNIPPET — LINK180 (barra axial pura, sem flexão)")
+    apdl.append("! Mechanical: Static Structural > Insert > Commands")
+    apdl.append("! ============================================================")
+    apdl.append("")
+    apdl.append("! Garante que todos os line bodies usam LINK180 (truss)")
+    apdl.append("ET,1,LINK180")
+    apdl.append("")
+    apdl.append("! Seções transversais por tipo de barra")
+ 
+    sec_id = 1
+    for label, mt in member_types_dict.items():
+        d    = getattr(mt, 'd', 0)
+        area = math.pi * (d / 2) ** 2
+        apdl.append(f"")
+        apdl.append(f"! {label}: d={d:.2f} mm → A={area:.6f} mm²")
+        apdl.append(f"SECTYPE,{sec_id},LINK,,{label}")
+        apdl.append(f"SECDATA,{area:.6f}")
+        sec_id += 1
+ 
+    apdl.append("")
+    if len(member_types_dict) == 1:
+        apdl.append("! Aplica a única seção a todos os elementos")
+        apdl.append("EMODIF,ALL,SECNUM,1")
+    else:
+        apdl.append("! ATENÇÃO: múltiplas seções — ajuste EMODIF por grupo de elementos.")
+        apdl.append("! Use ESEL,S,TYPE,,N antes de cada EMODIF,ALL,SECNUM,N")
+        apdl.append("! conforme o número de cada tipo de barra no seu modelo.")
+        apdl.append("EMODIF,ALL,SECNUM,1  ! <-- ajuste se tiver múltiplas seções")
+ 
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(apdl))
+ 
+    print(f"APDL snippet exportado: {filepath}")
+    print("  → Mechanical: Static Structural > Insert > Commands > cole o conteúdo")

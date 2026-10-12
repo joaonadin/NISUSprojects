@@ -52,20 +52,24 @@ member_types = {
 }
 
 optimal_div_2 = optimal_slenderness_ratio * d_fuselage_2
-joints = tl.generatesquarejoints(divisao=90, n1=1, divisao2=90, n2=5)
-tl.addnosejoints(h=0, b=50, l=30, joints=joints)
+joints = tl.generatesquarejoints(divisao=54, n1=6, divisao2=54, n2=4)
+tl.addnosejoints(h=90, b=100, l=50, joints=joints)
 #tl.addtailboom_straight(h=328, l=740, joints=joints, d_tailboom=d_tailboom)
-tl.addtailboom(h=301, l=765, joints=joints, d_tailboom=d_tailboom, b = 50)
-tl.add_landing_gear_pyramid(h=100, b = 10, joints=joints, section=0)
+tl.addtailboom(h=334, l=643, joints=joints, d_tailboom=d_tailboom)
+tl.add_landing_gear_pyramid(h=100, b = 20, joints=joints, section=0)
 
 # ============ GERAR GEOMETRIA ============
 truss = sl.Truss(dim=3)
 members = tl.setgeom(joints, trussgeom=0, nosegeom=0, tailboomgeom=0, 
                      tailboom_encaixe_params={'L': 120, 'b': optimal_slenderness_ratio*d_tailboom})
 
-#pinados, forces = tl.set_study_landinggear(joints, force=(0, 0, 500))
-pinados, forces = tl.set_study_tailboom(joints, force=-30, moment=-1.5)
-#pinados, forces = tl.setstudysquare(joints, 'concentrated', 100)
+
+pinados, forces = tl.set_study_landinggear(joints, force=(0, 0, 400))
+#pinados, forces = tl.set_study_tailboom(joints, force=-70, moment=-1.5)
+#pinados, forces = tl.setstudysquare(joints, 'concentrated', 200)
+
+
+print(forces)
 
 supports = tl.generatesupports(pinados, joints)
 
@@ -91,25 +95,27 @@ print(truss.weight)
 
 ###### PLOT FUNCTIONS 
 
-#tl.plottruss(truss, trussmembers, '3d', elementforces, label='Forças internas', title='Treliça Completa')
+#tl.print_material_lengths(members, joints, truss, member_types, E)
+
+tl.plottruss(truss, trussmembers, '3d', elementforces, label='Forças internas', title='Treliça Completa')
 
 # tl.plottrussBC(joints, supports, forces, members,view="3d", scale_force=2.0,title='Condições de Contorno - Treliça Completa'
 #               , member_diameters=member_diameters)
 
-tl.plot_truss_fluid(joints, members)
+#tl.plot_truss_fluid(joints, members)
 
 #tl.plottruss_sections(truss, trussmembers, members, joints,'side', member_types, 2.0)
 
 
-send_to = os.path.join(os.path.expanduser('~'), 'Desktop', 'NISUS\Truss\PRELIMINAR\B')
-os.makedirs(send_to, exist_ok=True)
+# send_to = os.path.join(os.path.expanduser('~'), 'Desktop', 'NISUS\Truss\PRELIMINAR\C')
+# os.makedirs(send_to, exist_ok=True)
 
-tl.truss_deliverable(
-    joints, members,
-    member_types_dict=member_types,
-    export_html=os.path.join(send_to, 'truss.html'),
-    export_csv=os.path.join(send_to, 'truss_data.csv')
-)
+# tl.truss_deliverable(
+#     joints, members,
+#     member_types_dict=member_types,
+#     export_html=os.path.join(send_to, 'truss.html'),
+#     export_csv=os.path.join(send_to, 'truss_data.csv')
+# )
 
 # send_to = os.path.join('C:\\Users\\joaon\\Desktop\\NISUS\\Truss\\datfiles', 'truss_original.dat')
 # tl.export_apdl(joints, members, member_types, filepath=send_to)

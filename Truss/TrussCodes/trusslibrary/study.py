@@ -13,8 +13,9 @@ def setstudysquare(joints, mode, Lforce):
 
     Atribui forças de acordo com o caso básico de estudo definido:
         35N de tração dividido entre 4 nós frontais,
-        380N de sustentação dividido entre nós superiores, desconsiderando primeira e última seções
-        140N de payload, divididos entre os 2 nós inferiores localizados em 40% do comprimento
+        Lforce de sustentação dividido entre nós superiores, desconsiderando primeira e última seções
+        No caso concentrado, Lforce aplicado na metade da treliça, dividido entre os 2 nós superiores da seção correspondente
+        80N de payload, divididos entre os 2 nós inferiores localizados em 40% do comprimento
         OBS: no caso concentrated, insere forças concentradas no início - mais coerente com a proposta
              adotada pela equipe para o projeto 2026
     Fixa nós da última seção - completamente pinados
@@ -44,7 +45,7 @@ def setstudysquare(joints, mode, Lforce):
         payloadnode1 = truss_ids[payload_section * 4]
         payloadnode2 = truss_ids[payload_section * 4 + 1]
     elif (mode == 'concentrated'):
-        s = 0                                             ## apply on first section
+        s = nsections//2                                             ## apply on first section
         upperright = np.array([truss_ids[4*s + 2] ])
         upperleft  = np.array([truss_ids[4*s + 3] ])
         payload_section = s+1
@@ -56,7 +57,7 @@ def setstudysquare(joints, mode, Lforce):
 
 
     Force  =  Lforce/2 / len(upperright)    ## metade da sustentação cada lado, dividido pela dist
-    Payload =  70
+    Payload =  80 / 2                            ## 100N de payload dividido entre os 2 nós
     Tforce  = -35 / len(tracionados)
 
     forces = []
@@ -202,29 +203,39 @@ def set_study_landinggear(joints, force):
     forces = []
     jointids = np.arange(0, len(joints), 1)
     labels = []
+    landinggear_types = set()
+
     for joint in joints:
         if isinstance(joint, dict):
             sections = joint.get('sections', [])
-            if 'landinggear_tow' or 'landinggear_pyr' in sections:
+            is_landinggear = any(tag in sections for tag in ('landinggear_tow', 'landinggear_pyr'))
+            if is_landinggear:
                 labels.append(1)
+                if 'landinggear_tow' in sections:
+                    landinggear_types.add('tower')
+                if 'landinggear_pyr' in sections:
+                    landinggear_types.add('pyramid')
             else:
                 labels.append(0)
         else:
             labels.append(0)
+
     labels = np.array(labels, dtype=int)
     landinggear_nodes = jointids[labels == 1]
-    nosejoints = split_parts(joints, case = 'forces')[0]
-    trussjoints = split_parts(joints, case = 'forces')[1] 
-    landinggearjoints = split_parts(joints, case = 'forces')[3]
-    truss_indices = [idx for idx, joint in enumerate(joints) 
-                 if isinstance(joint, dict) and 'truss' in joint.get('sections', [])]
-    if 'landinggear_tow' in sections:
+    nosejoints, trussjoints, _, landinggearjoints = split_parts(joints, case='forces')
+    truss_indices = [idx for idx, joint in enumerate(joints)
+                     if isinstance(joint, dict) and 'truss' in joint.get('sections', [])]
+
+    fixed_nodes = np.array([], dtype=int)
+    if 'tower' in landinggear_types:
         matched_local = get_matched_joints_tower(landinggearjoints, trussjoints)
-        fixed_nodes = np.array([truss_indices[i] for i in matched_local])
-    if 'landinggear_pyr' in sections:
+        fixed_nodes = np.array([truss_indices[i] for i in matched_local], dtype=int)
+    elif 'pyramid' in landinggear_types:
+        print("Pyramid landing gear detected. Matching joints for boundary conditions...")
         matched_local = get_matched_joints_pyramid(joints, landinggearjoints, trussjoints)
-        fixed_nodes = np.array([truss_indices[i] for i in matched_local])
+        fixed_nodes = np.array([truss_indices[i] for i in matched_local], dtype=int)
+
     last_nodes = landinggear_nodes[-4:]
     for i in last_nodes:
-        forces.append((i, (force[0]/4, force[1]/4, force[2]/4)))
+        forces.append((i, (force[0] / 4, force[1] / 4, force[2] / 4)))
     return fixed_nodes, forces
